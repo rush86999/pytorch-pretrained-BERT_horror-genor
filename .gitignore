@@ -1,5 +1,7 @@
-outputs/
-data/
+/outputs/
+/data/
+/data
+/outputs
 
 # Initially taken from Github's Python gitignore file
 
