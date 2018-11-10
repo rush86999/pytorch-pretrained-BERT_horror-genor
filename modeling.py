@@ -472,3 +472,40 @@ class BertForQuestionAnswering(nn.Module):
             return total_loss
         else:
             return start_logits, end_logits
+
+
+class BertForLanguageModelling(nn.Module):
+    """ Language Model Head for the language modelling """
+
+    def __init__(self, config):
+        super(BertForLanguageModelling, self).__init__()
+        self.bert = BertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        word_embed_weight = self.bert.embeddings.word_embeddings.weight
+        self.word_decode = torch.nn.Linear(word_embed_weight.shape[1], word_embed_weight.shape[0], bias=False)
+        self.word_decode.weight = word_embed_weight  # Tied weights
+
+        # pos_embed_weight = self.bert.embeddings.position_embeddings.weight
+        # self.pos_decode = torch.nn.Linear(pos_embed_weight.shape[1], pos_embed_weight.shape[0], bias=False)
+        # self.pos_decode.weight = pos_embed_weight
+
+        # tok_embed_weight = self.bert.embeddings.token_type_embeddings.weight
+        # self.tok_decode = torch.nn.Linear(tok_embed_weight.shape[1], tok_embed_weight.shape[0], bias=False)
+        # self.tok_decode.weight = tok_embed_weight
+
+    def forward(self, input_ids, token_type_ids, attention_mask, labels=None):
+        _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
+        pooled_output = self.dropout(pooled_output)
+
+        # why 4 of them?
+        logits = self.word_decode(pooled_output)
+        # pos = self.pos_decode(pooled_output[0])
+        # tokens = self.tok_decode(pooled_output[0])
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(logits, labels)
+            return loss, logits
+        else:
+            return logits
