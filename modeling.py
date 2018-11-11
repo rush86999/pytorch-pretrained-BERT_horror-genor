@@ -527,21 +527,29 @@ class BertForMaskedLanguageModelling(nn.Module):
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
+        # The output weights are the same as the input embeddings, but there is
+        # an output-only bias for each token.
+        # see https://github.com/google-research/bert/blob/master/run_pretraining.py#L257
         word_embed_weight = self.bert.embeddings.word_embeddings.weight
         self.word_decode = torch.nn.Linear(word_embed_weight.shape[1], word_embed_weight.shape[0], bias=True)
         self.word_decode.weight = word_embed_weight  # Tied weights
 
     def forward(self, input_ids, token_type_ids, attention_mask, labels=None, label_weights=None):
         seq_output, _ = self.bert(input_ids, token_type_ids, attention_mask)
-        # seq_output = self.dropout(seq_output)
-
-        logits = self.word_decode(seq_output[-1])
+        seq_output = seq_output[-1]
+        seq_output = self.dropout(seq_output)
+        logits = self.word_decode(seq_output)
 
         if labels is not None and label_weights is not None:
-            # see https://github.com/google-research/bert/blob/master/run_pretraining.py#L273
+            # The `label_weights`
+            # tensor has a value of 1.0 for every real prediction and 0.0 for the
+            # padding predictions.
+            # see https://github.com/google-research/bert/blob/d8014ef72/run_pretraining.py#L273
+            # FIXME I'm a bit confused about input_mask vs label_weights, however this does work
+            # I need to run the tensorflow version to look at wha exactly is contained in these variables
             log_probs = torch.nn.functional.log_softmax(logits, -1)
-            input_ids_1_hot = to_one_hot(input_ids, logits.shape[-1]).cuda()
-            per_example_loss = -(log_probs * input_ids_1_hot).sum(-1)
+            label_ids_1_hot = to_one_hot(labels, logits.shape[-1]).cuda()
+            per_example_loss = -(log_probs * label_ids_1_hot).sum(-1)
             numerator = (label_weights.float() * per_example_loss).sum()
             denominator = (label_weights.float()).sum() + 1e-5
             loss = numerator / denominator
