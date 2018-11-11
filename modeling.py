@@ -483,7 +483,7 @@ class BertForLanguageModelling(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         word_embed_weight = self.bert.embeddings.word_embeddings.weight
-        self.word_decode = torch.nn.Linear(word_embed_weight.shape[1], word_embed_weight.shape[0], bias=False)
+        self.word_decode = torch.nn.Linear(word_embed_weight.shape[1], word_embed_weight.shape[0], bias=True)
         self.word_decode.weight = word_embed_weight  # Tied weights
 
         # pos_embed_weight = self.bert.embeddings.position_embeddings.weight
@@ -496,7 +496,7 @@ class BertForLanguageModelling(nn.Module):
 
     def forward(self, input_ids, token_type_ids, attention_mask, labels=None):
         _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
-        pooled_output = self.dropout(pooled_output)
+        # pooled_output = self.dropout(pooled_output)
 
         # why 4 of them?
         logits = self.word_decode(pooled_output)
@@ -506,6 +506,45 @@ class BertForLanguageModelling(nn.Module):
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits, labels)
+            return loss, logits
+        else:
+            return logits
+
+def to_one_hot(y, n_dims=None):
+    """ Take integer y (tensor or variable) with n dims and convert it to 1-hot representation with n+1 dims. """
+    y_tensor = y.type(torch.LongTensor).view(-1, 1)
+    n_dims = n_dims if n_dims is not None else int(torch.max(y_tensor)) + 1
+    y_one_hot = torch.zeros(y_tensor.size()[0], n_dims).scatter_(1, y_tensor, 1)
+    y_one_hot = y_one_hot.view(*y.shape, -1)
+    return y_one_hot
+
+
+class BertForMaskedLanguageModelling(nn.Module):
+    """ Language Model Head for the language modelling """
+
+    def __init__(self, config):
+        super(BertForMaskedLanguageModelling, self).__init__()
+        self.bert = BertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        word_embed_weight = self.bert.embeddings.word_embeddings.weight
+        self.word_decode = torch.nn.Linear(word_embed_weight.shape[1], word_embed_weight.shape[0], bias=True)
+        self.word_decode.weight = word_embed_weight  # Tied weights
+
+    def forward(self, input_ids, token_type_ids, attention_mask, labels=None, label_weights=None):
+        seq_output, _ = self.bert(input_ids, token_type_ids, attention_mask)
+        # seq_output = self.dropout(seq_output)
+
+        logits = self.word_decode(seq_output[-1])
+
+        if labels is not None and label_weights is not None:
+            # see https://github.com/google-research/bert/blob/master/run_pretraining.py#L273
+            log_probs = torch.nn.functional.log_softmax(logits, -1)
+            input_ids_1_hot = to_one_hot(input_ids, logits.shape[-1]).cuda()
+            per_example_loss = -(log_probs * input_ids_1_hot).sum(-1)
+            numerator = (label_weights.float() * per_example_loss).sum()
+            denominator = (label_weights.float()).sum() + 1e-5
+            loss = numerator / denominator
             return loss, logits
         else:
             return logits
