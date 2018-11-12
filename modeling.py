@@ -526,19 +526,27 @@ class BertForMaskedLanguageModelling(nn.Module):
         super(BertForMaskedLanguageModelling, self).__init__()
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        word_embed_weight = self.bert.embeddings.word_embeddings.weight
+
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.LayerNorm = BERTLayerNorm(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # The output weights are the same as the input embeddings, but there is
         # an output-only bias for each token.
         # see https://github.com/google-research/bert/blob/master/run_pretraining.py#L257
-        word_embed_weight = self.bert.embeddings.word_embeddings.weight
         self.word_decode = torch.nn.Linear(word_embed_weight.shape[1], word_embed_weight.shape[0], bias=True)
         self.word_decode.weight = word_embed_weight  # Tied weights
 
     def forward(self, input_ids, token_type_ids, attention_mask, labels=None, label_weights=None):
         seq_output, _ = self.bert(input_ids, token_type_ids, attention_mask)
-        seq_output = seq_output[-1]
-        seq_output = self.dropout(seq_output)
-        logits = self.word_decode(seq_output)
+        hidden_states = seq_output[-1]
+
+        hidden_states = self.dense(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states)
+
+        logits = self.word_decode(hidden_states)
 
         if labels is not None and label_weights is not None:
             # The `label_weights`
