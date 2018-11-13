@@ -65,16 +65,16 @@ class DataProcessor(object):
 class LMProcessor(DataProcessor):
     """Processor for language modelling."""
 
-    def get_train_examples(self, data_dir, skip=1):
+    def get_train_examples(self, data_dir, **kwargs):
         """See base class."""
         return self._create_examples(
-            open(os.path.join(data_dir, "train.txt")).read(), "train", skip=skip
+            open(os.path.join(data_dir, "train.txt")).read(), "train", **kwargs
         )
 
-    def get_dev_examples(self, data_dir, skip=1):
+    def get_dev_examples(self, data_dir, **kwargs):
         """See base class."""
         return self._create_examples(
-            open(os.path.join(data_dir, "val.txt")).read(), "dev", skip=skip
+            open(os.path.join(data_dir, "val.txt")).read(), "dev", **kwargs
         )
 
     def get_labels(self):
@@ -287,6 +287,7 @@ def predict_masked_words(
                 tokens=log_label_ids[i][1:-2],
                 input_mask=input_mask[i][1:-2],
                 label_weights=label_weights[i][1:-2],
+                tokenizer=tokenizer
             ).replace("rgba(255,0,0", "rgba(0,0,255")
         )
     )
@@ -297,6 +298,7 @@ def predict_masked_words(
                 input_mask=input_mask[i][1:-1],
                 logits=logits[i][1:-1],
                 label_weights=label_weights[i][1:-1],
+                tokenizer=tokenizer
             )
         )
     )
@@ -416,6 +418,7 @@ def predict_next_words(
             tokens=input_ids[batch],
             input_mask=input_mask[batch],
             label_weights=label_weights[batch],
+            tokenizer=tokenizer
         )
     )
 
