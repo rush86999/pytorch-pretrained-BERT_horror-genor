@@ -187,17 +187,23 @@ def convert_tokens_to_features(
 
         # see https://github.com/google-research/bert/blob/d8014ef72/create_pretraining_data.py#L363
         label_weights = np.random.rand(len(input_ids)) < 0.10  # 10% change of masking
-        label_weights[-2] = 1  # Always do last word, to make sure it know how to generate next word
-        label_weights[0] = label_weights[-1] = 0 # not first or last [CLS][SEP]
+        label_weights = label_weights * input_mask # don't mask padding
+        last_idx = input_ids.index(102) 
+        label_weights[last_idx-1]=1 # Since we want to train for next word gen, lets always mask last word
+        label_weights[0] = label_weights[last_idx] = 0 # not first or last [CLS][SEP]
+
         label_keep = (
             np.random.rand(len(input_ids)) < 0.10
         ) * label_weights  # 10% chance of keeping
+
         label_switch = (
             np.random.rand(len(input_ids)) < 0.10
         ) * label_weights  # 10% chance of random word
-        label_switch[-2] = 1 # Always do last word, to make sure it know how to generate next word
-        label_mask = label_weights * (1 - label_keep) * (1 - label_keep)
 
+        # so mask where we are masking but not keeping or switching
+        label_mask = label_weights * (1 - label_keep) * (1 - label_switch)
+
+    # if we switch the id's, what to?
         switched_ids = np.random.randint(
             low=0, high=len(tokenizer.vocab) - 1, size=(len(input_ids),)
         )
@@ -320,7 +326,7 @@ def insert_next_word_input_ids(input_id, input_mask, segment_id, label_weight, n
     pre_input_mask, mid_input_mask, post_input_mask = torch.split(input_mask, splits)
     pre_segment_ids, mid_segment_ids, post_segment_ids = torch.split(segment_id, splits)
     pre_label_weights, mid_label_weights, post_label_weights = torch.split(label_weight, splits)
-    discard = mid_input_id[1]
+    discard = mid_input_id[0]
     if next_word is not None:
         input_id = torch.cat([pre_input_id, mid_input_id[1:-1], torch.tensor(np.array([next_word, 103])).cuda(), post_input_id])
         input_mask = torch.cat([pre_input_mask, mid_input_mask[1:-1], torch.tensor([1, 1]).cuda(), post_input_mask])
@@ -341,7 +347,7 @@ def insert_next_word_input_id(input_ids, input_masks, segment_ids, label_weights
     return [torch.stack(x, dim=0) for x in zip(*outs)]
 
 def predict_next_words(
-    text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, device="cuda"
+    text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, device="cuda", debug=False
 ):
     """
     Predict next `n` words for some `text`
@@ -356,8 +362,8 @@ def predict_next_words(
     - IPython html object, which show predicted words in red, with opacity indicating confidence
     """
     discarded = []
-    x = pad_seq(text, tokenizer=tokenizer, max_seq_length=max_seq_length)
-    ex = processor._create_examples(x, "train", tqdm=notqdm)[-1:]
+    # x = pad_seq(text, tokenizer=tokenizer, max_seq_length=max_seq_length)
+    ex = processor._create_examples(text, "train", tqdm=notqdm)[-1:]
     label_list = processor.get_labels()
 
     log_feats = convert_tokens_to_features(
@@ -393,7 +399,9 @@ def predict_next_words(
         input_ids, input_masks, segment_ids, label_ids, label_weights = batch
 
         # and add a mask token 2nd to last, and drop the first word (to keep max seq len)
-        discard, input_ids, input_masks, segment_ids, label_weights = insert_next_word_input_id(input_ids, input_masks, segment_ids, label_weights)
+        orig_len = input_ids[0]
+        discards, input_ids, input_masks, segment_ids, label_weights = insert_next_word_input_id(input_ids, input_masks, segment_ids, label_weights)
+        discarded.append(discards)
 
         for i in range(n):
             logits = model(input_ids, segment_ids, input_masks).detach()
@@ -422,6 +430,9 @@ def predict_next_words(
     segment_id = segment_ids[batch]
     label_weight = label_weights[batch]
 
+    if debug:
+        print(input_id)
+
     # first split off the [CLS]...[MASK][SEP][PAD]
     split = torch.argmax(input_id==102, dim=-1)
     splits = [1, split - 2, len(input_id) - split + 1]
@@ -436,9 +447,15 @@ def predict_next_words(
     input_mask = torch.cat(
         [torch.tensor([1] * len(discarded)).cuda(), mid_input_mask], -1
     )  # drop first, add [1] to end
+
+    # TODO 0 means original text, 1 means predicted but what if prediction is longer than context
+    # check against orig_len
     label_weight = torch.cat(
         [torch.tensor([0] * len(discarded)).cuda(), mid_label_weights], -1
     )  # drop 1st, add 1 to end of content
+
+    if debug:
+        print(input_id)
 
     
     # return html fragment, cleaned, but cut of the first and last two tokens which are [CLS] and [MASK][SEP]
