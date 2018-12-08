@@ -28,7 +28,6 @@ replace_list = [
 #     [UNK]
 #     [MASK]
 #     [CLS]
-    # TODO ideally I need to be able to do these with of without span tags
 ]
 
 def clean_decoded(tokens):
@@ -51,6 +50,9 @@ def html_clean_decoded_logits(input_ids, logits, input_mask, label_weights, toke
     html_yd = []
     for i in range(len(yd)):
         if not label_weights[i]:
+            if yd[i] == '[SEP]':
+                # remove all after the [SEP]
+                break
             html_yd.append(yd[i])
         else:
             prob = log_probs[i][prediction_idxs[i]].exp()
@@ -65,6 +67,9 @@ def html_clean_decoded(tokens, input_mask, label_weights, tokenizer):
     html_yd = []
     for i in range(len(yd)):
         if not label_weights[i]:
+            if yd[i] == '[SEP]':
+                # remove all after the [SEP]
+                break
             html_yd.append(yd[i])
         else:
             prob = 1
