@@ -606,8 +606,8 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
             bad_word_ids = label_ids[batch_i, bad_word_inds]
             decoder = {v:k for k,v in tokenizer.wordpiece_tokenizer.vocab.items()}
             bad_words = [decoder[ii.item()] for ii in bad_word_ids]
-            if debug:
-                print('bad_words', bad_words)
+#             if debug:
+#                 print('bad_words', bad_words)
             
     i=0
     display(
