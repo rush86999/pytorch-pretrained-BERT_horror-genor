@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 import tokenization
-from detokenization import html_clean_decoded, html_clean_decoded_logits
+from detokenization import html_clean_decoded, html_clean_decoded_logits, clean_decoded, text_clean_decoded
 
 
 def notqdm(it, *a, **k):
@@ -631,3 +631,9 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
             )
         )
     )
+    return text_clean_decoded(
+                tokens=label_ids[i][1:-2],
+                input_mask=input_mask[i][1:-2],
+                label_weights=label_weights[i][1:-2],
+                tokenizer=tokenizer
+            )

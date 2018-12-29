@@ -21,20 +21,28 @@ replace_list = [
     
     # tokenization
     ['\s?{}\#\#'.format(b4), r'\1'],    
-#     ['\[CLS\]\s?', ''],
-#     ['\s?\[SEP\]\s?', ''],
-    # ["\[\s?PAD\s?\]\s?", r""],
+
     ["\s?\¿\s?", r""],
 #     [UNK]
 #     [MASK]
 #     [CLS]
 ]
 
-def clean_decoded(tokens):
+replace_tokens_list = [
+    ['\[CLS\]\s?', ''],
+    ['\s?\[SEP\]\s?', ''],
+    ["\[\s?PAD\s?\]\s?", r""],
+]
+
+def clean_decoded(tokens, clean_tokens=False):
     s = ' '.join(tokens)
     for a, b in replace_list:
         p = re.search(a, s)
         s = re.sub(a, b, s)
+    if clean_tokens:
+        for a, b in replace_tokens_list:
+            p = re.search(a, s)
+            s = re.sub(a, b, s)
     return s
 
 
@@ -75,3 +83,11 @@ def html_clean_decoded(tokens, input_mask, label_weights, tokenizer):
             prob = 1
             html_yd.append('<span style="color: rgba(255,0,0,{})">{}</span>'.format(prob, yd[i]))
     return clean_decoded(html_yd)
+
+
+def text_clean_decoded(tokens, input_mask, label_weights, tokenizer):
+    """Format model outputs as html, with masked elements in red, with opacity indicating confidence."""
+    decoder = {v:k for k,v in tokenizer.wordpiece_tokenizer.vocab.items()}
+    yd = [decoder[hh.item()] for hh in tokens]
+    html_yd = []
+    return clean_decoded(yd, clean_tokens=True)
