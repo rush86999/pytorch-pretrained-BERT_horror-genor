@@ -538,11 +538,11 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
 
             # choose which ones to mask, by downweighting ones already masked....
             mask_prob = np.random.rand(len(input_ids[0]))/(masked_count+1)
-            mask_prob = mask_prob[:,:1:-1]
+            mask_prob[:,0] = mask_prob[:,-1] = 0
             mask_prob /= mask_prob.sum()
             mask_size = int(len(input_ids[0])*ITERATIVE_MASK_FRAC)
             mask_choices = np.random.choice(
-                a=range(1,len(mask_prob[0])+1), 
+                a=range(0,len(mask_prob[0])), 
                 size=mask_size,
                 p=mask_prob[0],
                 replace=False
@@ -649,7 +649,7 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
 
 
 def improve_words_all(
-text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MASK_FRAC=0.05, device="cuda", debug=False
+text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MASK_FRAC=0.05, device="cuda", debug=False, min_replacements=1,
 ):
     """
     Predict next `n` words for some `text`
@@ -709,21 +709,24 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
         masked_count = np.zeros(input_ids.shape)
         bad_word_inds = []
         
-
-        while masked_count.min()==0:
+        itr = 0
+        while masked_count[:,1:-1].min()<min_replacements:
+            itr+=1
             # mask some
 
+
             # choose which ones to mask, by downweighting ones already masked....
-            mask_prob = np.random.rand(len(input_ids[0]))/(masked_count+1)
-            mask_prob = mask_prob[:,:1:-1]
-            mask_prob /= mask_prob.sum()
+            mask_prob = 1/(masked_count+1)
+            mask_prob[:,0] = mask_prob[:,-1] = 0
+            mask_prob /= mask_prob.sum()            
             mask_size = int(len(input_ids[0])*ITERATIVE_MASK_FRAC)
             mask_choices = np.random.choice(
-                a=range(1,len(mask_prob[0])+1), 
+                a=range(0,len(mask_prob[0])), 
                 size=mask_size,
                 p=mask_prob[0],
                 replace=False
             )
+            if itr>60: raise Exception('1')
             
 
 
@@ -734,14 +737,14 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
             input_ids[0, mask_choices]=103
             label_weights[0, mask_choices] = 1 # undo prev label weights
 
-            # mask some of the the low prob ones from previously... if any
-            if len(bad_word_inds)>mask_size:
-                bad_word_inds = np.random.choice(a=bad_word_inds, size=mask_size, replace=False)
-            input_ids[0, np.array(bad_word_inds)]=103
-            label_weights[0, np.array(bad_word_inds)]=1
+#             # mask some of the the low prob ones from previously... if any
+#             if len(bad_word_inds)>mask_size:
+#                 bad_word_inds = np.random.choice(a=bad_word_inds, size=mask_size, replace=False)
+#             input_ids[0, np.array(bad_word_inds)]=103
+#             label_weights[0, np.array(bad_word_inds)]=1
+            
+            masked_count += (input_ids==103).float().numpy()*1000000
 
-            # record them
-            masked_count += (input_ids==103)*1000
 
             # predict...
             logits = model(input_ids, segment_ids, input_mask).detach()
@@ -779,15 +782,14 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
             label_ids = input_ids *  (1 - label_weights) + prediction_idxs * label_weights
             input_ids = label_ids * 1
 
-            # work out the probability of each word
-            batch_i=0
-            word_probs = log_probs[batch_i, range(log_probs.shape[1]), label_ids[batch_i]].exp()
-            bad_word_inds = np.argwhere(word_probs<0.10)[0, 1:-1].numpy().tolist() # the 1:-1 ignore the cls and sep tokens
+#             # work out the probability of each word
+#             batch_i=0
+#             word_probs = log_probs[batch_i, range(log_probs.shape[1]), label_ids[batch_i]].exp()
+#             bad_word_inds = np.argwhere(word_probs<0.10)[0, 1:-1].numpy().tolist() # the 1:-1 ignore the cls and sep tokens
 
-
-            bad_word_ids = label_ids[batch_i, bad_word_inds]
-            decoder = {v:k for k,v in tokenizer.wordpiece_tokenizer.vocab.items()}
-            bad_words = [decoder[ii.item()] for ii in bad_word_ids]
+#             bad_word_ids = label_ids[batch_i, bad_word_inds]
+#             decoder = {v:k for k,v in tokenizer.wordpiece_tokenizer.vocab.items()}
+#             bad_words = [decoder[ii.item()] for ii in bad_word_ids]
 #             if debug:
 #                 print('bad_words', bad_words)
             
