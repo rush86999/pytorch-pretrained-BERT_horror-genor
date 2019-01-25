@@ -491,6 +491,10 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
     # tokenize
     ex = processor._create_examples(text, "train", tqdm=notqdm)[-1:]
     label_list = processor.get_labels()
+    
+    input_token_len = len(ex[0].text_a)
+    if input_token_len<max_seq_length:
+        print('Warning your input text has less words/tokens than the max ({}<{} tokens). This may cause instability. \nTokens: {}'.format(input_token_len, max_seq_length, ex[0].text_a))
 
     # to ids
     log_feats = convert_tokens_to_features(
@@ -610,30 +614,34 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
 #                 print('bad_words', bad_words)
             
     i=0
-    display(
-        HTML(
-            html_clean_decoded(
-                tokens=label_ids[i][1:-2],
-                input_mask=input_mask[i][1:-2],
-                label_weights=label_weights[i][1:-2],
-                tokenizer=tokenizer
-            ).replace("rgba(255,0,0", "rgba(0,0,255")
-        )
-    )
-    display(
-        HTML(
-            html_clean_decoded_logits(
-                input_ids=input_ids[i][1:-1],
-                input_mask=input_mask[i][1:-1],
-                logits=logits[i][1:-1],
-                label_weights=label_weights[i][1:-1],
-                tokenizer=tokenizer
-            )
-        )
-    )
-    return text_clean_decoded(
+    cleaned_poem=text_clean_decoded(
                 tokens=label_ids[i][1:-2],
                 input_mask=input_mask[i][1:-2],
                 label_weights=label_weights[i][1:-2],
                 tokenizer=tokenizer
             )
+    if debug:
+        display(
+            HTML(
+                html_clean_decoded(
+                    tokens=label_ids[i][1:-2],
+                    input_mask=input_mask[i][1:-2],
+                    label_weights=label_weights[i][1:-2],
+                    tokenizer=tokenizer
+                ).replace("rgba(255,0,0", "rgba(0,0,255")
+            )
+        )
+        display(
+            HTML(
+                html_clean_decoded_logits(
+                    input_ids=input_ids[i][1:-1],
+                    input_mask=input_mask[i][1:-1],
+                    logits=logits[i][1:-1],
+                    label_weights=label_weights[i][1:-1],
+                    tokenizer=tokenizer
+                )
+            )
+        )
+        print(cleaned_poem)
+    
+    return cleaned_poem

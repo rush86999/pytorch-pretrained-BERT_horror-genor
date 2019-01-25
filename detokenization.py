@@ -2,8 +2,9 @@ import re
 from IPython.display import HTML, display
 from torch import nn
 
-b4='(\<span[^\>]+\>)?'
-after='(\<\/span\>)?'
+# regexp for a before or after span tag, with any html attributes inside
+b4='(\<span[^\>]+\>)?' # will match e.g. <span style="color: rgba(255,0,0,{})">
+after='(\<\/span\>)?' # will match <\span>
 
 replace_list = [
     # punctuation
@@ -58,9 +59,9 @@ def html_clean_decoded_logits(input_ids, logits, input_mask, label_weights, toke
     html_yd = []
     for i in range(len(yd)):
         if not label_weights[i]:
-            if yd[i] == '[SEP]':
-                # remove all after the [SEP]
-                break
+#             if yd[i] == '[SEP]':
+#                 # remove all after the [SEP]
+#                 break
             html_yd.append(yd[i])
         else:
             prob = log_probs[i][prediction_idxs[i]].exp()
