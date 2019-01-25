@@ -645,3 +645,181 @@ text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MA
         print(cleaned_poem)
     
     return cleaned_poem
+
+
+
+def improve_words_all(
+text, processor, tokenizer, model, max_seq_length=300, n=10, T=1.0, ITERATIVE_MASK_FRAC=0.05, device="cuda", debug=False
+):
+    """
+    Predict next `n` words for some `text`
+    Args:
+    - text (str) base string, we will predict next words
+    - processor
+    - tokenizer
+    - n (int) amount of words to predict
+    - T (float) temperature for when samping predictions
+
+    Returns:
+    - IPython html object, which show predicted words in red, with opacity indicating confidence
+    """
+
+    # tokenize
+    ex = processor._create_examples(text, "train", tqdm=notqdm)[-1:]
+    label_list = processor.get_labels()
+    
+    input_token_len = len(ex[0].text_a)
+    if input_token_len<max_seq_length:
+        print('Warning your input text has less words/tokens than the max ({}<{} tokens). This may cause instability. \nTokens: {}'.format(input_token_len, max_seq_length, ex[0].text_a))
+
+    # to ids
+    log_feats = convert_tokens_to_features(
+        ex, label_list, max_seq_length, tokenizer, tqdm=notqdm
+    )
+
+
+
+    with torch.no_grad():
+
+        # to tensors
+        log_input_ids = torch.tensor([f.input_ids for f in log_feats], dtype=torch.long)
+        log_input_mask = torch.tensor(
+            [f.input_mask for f in log_feats], dtype=torch.long
+        )
+        log_segment_ids = torch.tensor(
+            [f.segment_ids for f in log_feats], dtype=torch.long
+        )
+        log_label_ids = torch.tensor([f.label_id for f in log_feats], dtype=torch.long)
+        log_label_weights = torch.tensor(
+            [f.label_weights for f in log_feats], dtype=torch.long
+        )
+
+        # to gpu/device
+        batch = [
+            log_input_ids,
+            log_input_mask,
+            log_segment_ids,
+            log_label_ids,
+            log_label_weights,
+        ]
+        batch = tuple(t.to(device) for t in batch)
+        input_ids, input_mask, segment_ids, label_ids, label_weights = batch
+
+        # remember which ones we have masked
+        masked_count = np.zeros(input_ids.shape)
+        bad_word_inds = []
+        
+
+        while masked_count.min()==0:
+            # mask some
+
+            # choose which ones to mask, by downweighting ones already masked....
+            mask_prob = np.random.rand(len(input_ids[0]))/(masked_count+1)
+            mask_prob = mask_prob[:,:1:-1]
+            mask_prob /= mask_prob.sum()
+            mask_size = int(len(input_ids[0])*ITERATIVE_MASK_FRAC)
+            mask_choices = np.random.choice(
+                a=range(1,len(mask_prob[0])+1), 
+                size=mask_size,
+                p=mask_prob[0],
+                replace=False
+            )
+            
+
+
+            # now mask those ones
+            input_ids = label_ids*1 # undo prev masks
+            label_weights[0, 1:-1] = 0 # undo prev label weights
+
+            input_ids[0, mask_choices]=103
+            label_weights[0, mask_choices] = 1 # undo prev label weights
+
+            # mask some of the the low prob ones from previously... if any
+            if len(bad_word_inds)>mask_size:
+                bad_word_inds = np.random.choice(a=bad_word_inds, size=mask_size, replace=False)
+            input_ids[0, np.array(bad_word_inds)]=103
+            label_weights[0, np.array(bad_word_inds)]=1
+
+            # record them
+            masked_count += (input_ids==103)*1000
+
+            # predict...
+            logits = model(input_ids, segment_ids, input_mask).detach()
+
+            if debug and (itr%debug==0):
+                i = 0
+                display(
+                    HTML(
+                        html_clean_decoded(
+                            tokens=label_ids[i][1:-2],
+                            input_mask=input_mask[i][1:-2],
+                            label_weights=label_weights[i][1:-2],
+                            tokenizer=tokenizer
+                        ).replace("rgba(255,0,0", "rgba(0,0,255")
+                    )
+                )
+                display(
+                    HTML(
+                        html_clean_decoded_logits(
+                            input_ids=input_ids[i][1:-1],
+                            input_mask=input_mask[i][1:-1],
+                            logits=logits[i][1:-1],
+                            label_weights=label_weights[i][1:-1],
+                            tokenizer=tokenizer
+                        )
+                    )
+                )
+                
+
+            # update the label ids with new predictions
+            log_probs = nn.LogSoftmax(-1)(logits).detach()
+            prediction_idxs = torch.distributions.Multinomial(logits=logits / T).sample().argmax(-1)
+
+    #         prediction_idxs = log_probs.argmax(-1)
+            label_ids = input_ids *  (1 - label_weights) + prediction_idxs * label_weights
+            input_ids = label_ids * 1
+
+            # work out the probability of each word
+            batch_i=0
+            word_probs = log_probs[batch_i, range(log_probs.shape[1]), label_ids[batch_i]].exp()
+            bad_word_inds = np.argwhere(word_probs<0.10)[0, 1:-1].numpy().tolist() # the 1:-1 ignore the cls and sep tokens
+
+
+            bad_word_ids = label_ids[batch_i, bad_word_inds]
+            decoder = {v:k for k,v in tokenizer.wordpiece_tokenizer.vocab.items()}
+            bad_words = [decoder[ii.item()] for ii in bad_word_ids]
+#             if debug:
+#                 print('bad_words', bad_words)
+            
+    i=0
+    cleaned_poem=text_clean_decoded(
+                tokens=label_ids[i][1:-2],
+                input_mask=input_mask[i][1:-2],
+                label_weights=label_weights[i][1:-2],
+                tokenizer=tokenizer
+            )
+    if debug:
+        display(
+            HTML(
+                html_clean_decoded(
+                    tokens=label_ids[i][1:-2],
+                    input_mask=input_mask[i][1:-2],
+                    label_weights=label_weights[i][1:-2],
+                    tokenizer=tokenizer
+                ).replace("rgba(255,0,0", "rgba(0,0,255")
+            )
+        )
+        display(
+            HTML(
+                html_clean_decoded_logits(
+                    input_ids=input_ids[i][1:-1],
+                    input_mask=input_mask[i][1:-1],
+                    logits=logits[i][1:-1],
+                    label_weights=label_weights[i][1:-1],
+                    tokenizer=tokenizer
+                )
+            )
+        )
+        print(cleaned_poem)
+    
+    return cleaned_poem
